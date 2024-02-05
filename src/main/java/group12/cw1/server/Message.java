@@ -4,9 +4,10 @@ import java.util.Date;
 
 public class Message {
     private String sender;
-    private String recipient;
-    private String content;
+    private String recipient; // Consider storing encrypted if necessary
+    private String content; // Already encrypted
     private Date timestamp;
+    // Optional: include a digital signature property if needed
 
     public Message(String sender, String recipient, String content, Date timestamp) {
         this.sender = sender;
@@ -15,20 +16,10 @@ public class Message {
         this.timestamp = timestamp;
     }
 
-    public String getSender() {
-        return sender;
-    }
-
-    public String getRecipient() {
-        return recipient;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public Date getTimestamp() {
-        return timestamp;
-    }
+    // Getters
+    public String getSender() { return sender; }
+    public String getRecipient() { return recipient; }
+    public String getContent() { return content; }
+    public Date getTimestamp() { return timestamp; }
 }
 

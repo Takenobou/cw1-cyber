@@ -9,8 +9,12 @@ import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Date;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.FileHandler;
@@ -22,7 +26,6 @@ public class Server {
     private static final String SERVER_ID = "server";
 
     static {
-        // Configure logger with handler and formatter
         try {
             FileHandler fileHandler = new FileHandler("ServerLog.log", true);
             fileHandler.setFormatter(new SimpleFormatter());
@@ -34,7 +37,6 @@ public class Server {
     }
 
     public static void main(String[] args) {
-        // Check if the program was run with the correct number of arguments
         if (args.length != 1) {
             logger.severe("Usage: java Server <port>");
             return;
@@ -43,7 +45,6 @@ public class Server {
         int port = Integer.parseInt(args[0]);
         String privateKeyFile = SERVER_ID + ".prv";
 
-        // Declare serverPrivateKey outside the try block to check for exceptions related to key loading
         PrivateKey serverPrivateKey;
         try {
             serverPrivateKey = loadPrivateKey(privateKeyFile);
@@ -59,7 +60,6 @@ public class Server {
             return;
         }
 
-        // Now start the server socket within the try-with-resources statement
         try (ServerSocket serverSocket = new ServerSocket(port)) {
             logger.info("Server is listening on port " + port);
 
@@ -75,14 +75,13 @@ public class Server {
                     break;
                 } catch (Exception e) {
                     logger.log(Level.SEVERE, "Unexpected exception while accepting a connection", e);
-                    // Handle other unexpected exceptions, if necessary, or re-throw them
+                    // TODO: EXPAND EXCEPTION HANDLING
                 }
             }
         } catch (IOException e) {
             logger.log(Level.SEVERE, "IO Exception while starting or running server", e);
         }
     }
-
 
     // Load the RSA private key from a file
     private static PrivateKey loadPrivateKey(String filename) throws Exception {
@@ -106,28 +105,44 @@ public class Server {
             try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                  BufferedWriter out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()))) {
 
-                // Receive encrypted userid/message from client
-                String encryptedData = in.readLine();
-                System.out.println("Received encrypted data: " + encryptedData);
-
-                // Decrypt the received data using the server's private key
-                String decryptedData = decryptMessage(encryptedData, serverPrivateKey);
-                System.out.println("Decrypted data: " + decryptedData);
-
-                // Acknowledge the decryption (this could be more meaningful based on your protocol)
+                // Initially acknowledge connection to client for further communication
                 out.write("ACK\n");
                 out.flush();
 
-                // Process decrypted data (e.g., store or forward the message)
-                // For simplicity, assume decryptedData is a message for another user
-                // In a real scenario, you should parse decryptedData and take appropriate actions
-                // Here, we simply echo back the decrypted data as a proof of concept
-                out.write(decryptedData + "\n");
+                // Step 1: Wait for the client to send their ID
+                String encryptedClientId = in.readLine();
+                String clientId = decryptMessage(encryptedClientId, serverPrivateKey);
+                System.out.println("Client ID: " + clientId);
+
+                // Step 2: Send stored messages to the client
+                ArrayList<Message> messagesForClient = MessageStore.getMessagesForRecipient(clientId);
+                out.write(messagesForClient.size() + "\n"); // Inform the client about the number of messages
                 out.flush();
 
-                // Close client connection after handling
-                System.out.println("Message processed...");
-                socket.close();
+                for (Message msg : messagesForClient) {
+                    String encryptedMessage = encryptMessageForClient(msg.getContent(), clientId); // Encrypt each message with the recipient's public key
+                    out.write(encryptedMessage + "\n");
+                    out.flush();
+                }
+
+                // Step 3: Listen for a new message
+                String newEncryptedMessage = in.readLine();
+                while (newEncryptedMessage != null && !newEncryptedMessage.isEmpty()) {
+                    String decryptedMessage = decryptMessage(newEncryptedMessage, serverPrivateKey);
+                    System.out.println("Received message: " + decryptedMessage);
+
+                    String[] parts = decryptedMessage.split(":", 2);
+                    if (parts.length == 2) { // Ensure the message format is correct
+                        String recipientId = parts[0];
+                        String messageContent = parts[1];
+                        MessageStore.addMessage(new Message(clientId, recipientId, messageContent, new Date())); // Store the new message
+                    }
+
+                    // Optionally, wait for more messages or close the connection
+                    newEncryptedMessage = in.readLine(); // For continuous communication, remove or adjust this line according to your protocol
+                }
+
+                System.out.println("Client " + clientId + " disconnected.");
             } catch (IOException e) {
                 logger.log(Level.SEVERE, "Error handling client connection", e);
             } catch (GeneralSecurityException e) {
@@ -135,11 +150,33 @@ public class Server {
             }
         }
 
+
         private String decryptMessage(String encryptedMessage, PrivateKey privateKey) throws GeneralSecurityException {
             Cipher decryptCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
             decryptCipher.init(Cipher.DECRYPT_MODE, privateKey);
             byte[] decryptedBytes = decryptCipher.doFinal(Base64.getDecoder().decode(encryptedMessage));
             return new String(decryptedBytes);
+        }
+
+        private PublicKey loadPublicKeyForUser(String userId) throws Exception {
+            String publicKeyFilename = userId + ".pub";
+            byte[] keyBytes = Files.readAllBytes(Paths.get(publicKeyFilename));
+            X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
+            KeyFactory kf = KeyFactory.getInstance("RSA");
+            return kf.generatePublic(spec);
+        }
+
+        private String encryptMessageForClient(String message, String clientId) {
+            try {
+                PublicKey recipientPublicKey = loadPublicKeyForUser(clientId);
+                Cipher encryptCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+                encryptCipher.init(Cipher.ENCRYPT_MODE, recipientPublicKey);
+                byte[] encryptedBytes = encryptCipher.doFinal(message.getBytes());
+                return Base64.getEncoder().encodeToString(encryptedBytes);
+            } catch (Exception e) {
+                logger.log(Level.SEVERE, "Error encrypting message for " + clientId, e);
+                return null; // TODO: HANDLE PROPERLY THIS AINT GONNA CUT IT
+            }
         }
     }
 }

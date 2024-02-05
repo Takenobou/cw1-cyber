@@ -1,6 +1,7 @@
-package group12.cw1;
+package group12.cw1.server;
 
-import java.io.IOException;
+import javax.crypto.Cipher;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
@@ -9,6 +10,7 @@ import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.spec.PKCS8EncodedKeySpec;
+import java.util.Base64;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.FileHandler;
@@ -41,8 +43,8 @@ public class Server {
         int port = Integer.parseInt(args[0]);
         String privateKeyFile = SERVER_ID + ".prv";
 
-        // Declare serverPrivateKey outside of the try block to check for exceptions related to key loading
-        PrivateKey serverPrivateKey = null;
+        // Declare serverPrivateKey outside the try block to check for exceptions related to key loading
+        PrivateKey serverPrivateKey;
         try {
             serverPrivateKey = loadPrivateKey(privateKeyFile);
             logger.info("Server's private key loaded.");
@@ -67,7 +69,7 @@ public class Server {
                     logger.info("New client connected");
 
                     // Handle client connection in a separate thread
-                    new ClientHandler(socket).start();
+                    new ClientHandler(socket, serverPrivateKey).start();
                 } catch (IOException e) {
                     logger.log(Level.SEVERE, "IO Exception while accepting a connection", e);
                     break;
@@ -93,22 +95,51 @@ public class Server {
     // ClientHandler class to manage each client connection
     private static class ClientHandler extends Thread {
         private final Socket socket;
+        private final PrivateKey serverPrivateKey;
 
-        public ClientHandler(Socket socket) {
+        public ClientHandler(Socket socket, PrivateKey serverPrivateKey) {
             this.socket = socket;
+            this.serverPrivateKey = serverPrivateKey;
         }
 
         public void run() {
-            try {
-                logger.info("Handling client connection...");
-                // Implement communication with client
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                 BufferedWriter out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()))) {
+
+                // Receive encrypted userid/message from client
+                String encryptedData = in.readLine();
+                System.out.println("Received encrypted data: " + encryptedData);
+
+                // Decrypt the received data using the server's private key
+                String decryptedData = decryptMessage(encryptedData, serverPrivateKey);
+                System.out.println("Decrypted data: " + decryptedData);
+
+                // Acknowledge the decryption (this could be more meaningful based on your protocol)
+                out.write("ACK\n");
+                out.flush();
+
+                // Process decrypted data (e.g., store or forward the message)
+                // For simplicity, assume decryptedData is a message for another user
+                // In a real scenario, you should parse decryptedData and take appropriate actions
+                // Here, we simply echo back the decrypted data as a proof of concept
+                out.write(decryptedData + "\n");
+                out.flush();
 
                 // Close client connection after handling
+                System.out.println("Message processed...");
                 socket.close();
-                logger.info("Client connection closed.");
             } catch (IOException e) {
                 logger.log(Level.SEVERE, "Error handling client connection", e);
+            } catch (GeneralSecurityException e) {
+                logger.log(Level.SEVERE, "Error decrypting message", e);
             }
+        }
+
+        private String decryptMessage(String encryptedMessage, PrivateKey privateKey) throws GeneralSecurityException {
+            Cipher decryptCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+            decryptCipher.init(Cipher.DECRYPT_MODE, privateKey);
+            byte[] decryptedBytes = decryptCipher.doFinal(Base64.getDecoder().decode(encryptedMessage));
+            return new String(decryptedBytes);
         }
     }
 }

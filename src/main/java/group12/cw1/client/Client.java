@@ -2,6 +2,7 @@ package group12.cw1.client;
 
 import java.io.*;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
@@ -70,20 +71,21 @@ public class Client {
                     System.out.println("Message " + (i + 1) + ": " + decryptedMessage);
                 }
 
-                // User input to send a new message
-                System.out.println("Enter recipient's user ID and message in the format 'recipientId:message'");
+                System.out.println("Enter recipient's user ID:");
                 BufferedReader userInput = new BufferedReader(new InputStreamReader(System.in));
-                String newMessage = userInput.readLine();
+                String recipientId = userInput.readLine(); // Read recipient's user ID
 
-                // Encrypt and send the new message to the server
+                System.out.println("Enter your message:");
+                String message = userInput.readLine(); // Read message content
+
+                // Concatenate recipientId and message with a colon separator
+                String newMessage = recipientId + ":" + message;
+
+                // Continue with encryption and sending as before
                 String encryptedNewMessage = encrypt(newMessage, serverPublicKey);
                 out.println(encryptedNewMessage);
-
+                System.out.println("Encrypted message sent to the server.");
                 logger.info("New message sent to the server.");
-
-                // Wait for server's response to the new message
-                String serverResponse = in.readLine();
-                System.out.println("Server response: " + serverResponse);
             }
         } catch (IOException e) {
             logger.log(Level.WARNING, "IO Exception while connecting or communicating with server", e);
@@ -120,5 +122,19 @@ public class Client {
         cipher.init(Cipher.DECRYPT_MODE, privateKey);
         byte[] decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedData));
         return new String(decryptedBytes);
+    }
+
+
+    private static String hashUserId(String userId) throws NoSuchAlgorithmException {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(userId.getBytes(StandardCharsets.UTF_8));
+        return Base64.getEncoder().encodeToString(hash);
+    }
+
+    private static boolean verifySignature(String data, String signature, PublicKey publicKey) throws GeneralSecurityException {
+        Signature sig = Signature.getInstance("SHA256withRSA");
+        sig.initVerify(publicKey);
+        sig.update(data.getBytes());
+        return sig.verify(Base64.getDecoder().decode(signature));
     }
 }

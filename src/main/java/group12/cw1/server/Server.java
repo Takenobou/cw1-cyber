@@ -6,10 +6,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
-import java.security.PrivateKey;
-import java.security.PublicKey;
+import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
@@ -178,5 +175,13 @@ public class Server {
                 return null; // TODO: HANDLE PROPERLY THIS AINT GONNA CUT IT
             }
         }
+
+        private static boolean verifySignature(String data, String signature, PublicKey publicKey) throws GeneralSecurityException {
+            Signature sig = Signature.getInstance("SHA256withRSA");
+            sig.initVerify(publicKey);
+            sig.update(data.getBytes());
+            return sig.verify(Base64.getDecoder().decode(signature));
+        }
+
     }
 }

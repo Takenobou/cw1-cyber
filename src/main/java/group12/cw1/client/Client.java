@@ -2,18 +2,19 @@ package group12.cw1.client;
 
 import java.io.*;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import javax.crypto.Cipher;
+import java.text.SimpleDateFormat;
 import java.util.Base64;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
+import java.util.Date;
 
 public class Client {
     private static final Logger logger = Logger.getLogger(Client.class.getName());
@@ -62,12 +63,18 @@ public class Client {
 
                 // Receive the number of messages stored for the user
                 int messageCount = Integer.parseInt(in.readLine());
-                System.out.println("You have " + messageCount + " new message(s).");
+                System.out.println("There are " + messageCount + " message(s) for you.");
 
                 for (int i = 0; i < messageCount; i++) {
+                    // Receive the message along with the timestamp
+                    String timestampString = in.readLine();
+                    Date timestamp = new Date(Long.parseLong(timestampString));
+
                     // Assume server sends encrypted messages that client can decrypt with its private key
                     String encryptedMessage = in.readLine();
                     String decryptedMessage = decrypt(encryptedMessage, loadPrivateKey(userId + ".prv"));
+
+                    System.out.println("Date: " + timestamp);
                     System.out.println("Message " + (i + 1) + ": " + decryptedMessage);
                 }
 
@@ -81,9 +88,24 @@ public class Client {
                 // Concatenate recipientId and message with a colon separator
                 String newMessage = recipientId + ":" + message;
 
-                // Continue with encryption and sending as before
-                String encryptedNewMessage = encrypt(newMessage, serverPublicKey);
-                out.println(encryptedNewMessage);
+                // Get current timestamp
+                Date currentTime = new Date();
+                SimpleDateFormat dateFormat = new SimpleDateFormat("E MMM dd HH:mm:ss zzz yyyy");
+                String formattedTimestamp = dateFormat.format(currentTime);
+
+                // After encrypting the message
+                byte[] encryptedMessageBytes = encrypt(newMessage, serverPublicKey).getBytes();
+
+                // Generate a digital signature using the client's private key
+                Signature signature = Signature.getInstance("SHA256withRSA");
+                signature.initSign(loadPrivateKey(userId + ".prv"));
+                signature.update(encryptedMessageBytes);
+                byte[] digitalSignature = signature.sign();
+
+                // Send the encrypted message and the digital signature to the server
+                out.println(formattedTimestamp);
+                out.println(Base64.getEncoder().encodeToString(encryptedMessageBytes)); // Send encrypted message
+                out.println(Base64.getEncoder().encodeToString(digitalSignature)); // Send digital signature
                 System.out.println("Encrypted message sent to the server.");
                 logger.info("New message sent to the server.");
             }
@@ -122,19 +144,5 @@ public class Client {
         cipher.init(Cipher.DECRYPT_MODE, privateKey);
         byte[] decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedData));
         return new String(decryptedBytes);
-    }
-
-
-    private static String hashUserId(String userId) throws NoSuchAlgorithmException {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] hash = digest.digest(userId.getBytes(StandardCharsets.UTF_8));
-        return Base64.getEncoder().encodeToString(hash);
-    }
-
-    private static boolean verifySignature(String data, String signature, PublicKey publicKey) throws GeneralSecurityException {
-        Signature sig = Signature.getInstance("SHA256withRSA");
-        sig.initVerify(publicKey);
-        sig.update(data.getBytes());
-        return sig.verify(Base64.getDecoder().decode(signature));
     }
 }

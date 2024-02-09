@@ -9,6 +9,8 @@ import java.nio.file.Paths;
 import java.security.*;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
@@ -108,8 +110,9 @@ public class Server {
 
                 // Step 1: Wait for the client to send their ID
                 String encryptedClientId = in.readLine();
-                String clientId = decryptMessage(encryptedClientId, serverPrivateKey);
-                System.out.println("Client ID: " + clientId);
+                String clientId = decrypt(encryptedClientId, serverPrivateKey);
+                String hashedClientId = hashUserID(clientId);
+                System.out.println("Client ID: " + hashedClientId);
 
                 // Step 2: Send stored messages to the client
                 ArrayList<Message> messagesForClient = MessageStore.getMessagesForRecipient(clientId);
@@ -118,37 +121,61 @@ public class Server {
 
                 for (Message msg : messagesForClient) {
                     String encryptedMessage = encryptMessageForClient(msg.getContent(), clientId); // Encrypt each message with the recipient's public key
+                    out.write(msg.getTimestamp().getTime() + "\n"); // Send timestamp as milliseconds
+                    out.flush();
                     out.write(encryptedMessage + "\n");
                     out.flush();
                 }
 
                 // Step 3: Listen for a new message
-                String newEncryptedMessage = in.readLine();
-                while (newEncryptedMessage != null && !newEncryptedMessage.isEmpty()) {
-                    String decryptedMessage = decryptMessage(newEncryptedMessage, serverPrivateKey);
-                    System.out.println("Received message: " + decryptedMessage);
+                String timestampStr = in.readLine(); // Read timestamp from client
+                String newEncryptedMessage = in.readLine(); // Read encrypted message from client
+                String digitalSignatureString = in.readLine(); // Read digital signature from client
 
+                // Verify the signature using the client's public key
+                byte[] encryptedMessageBytes = Base64.getDecoder().decode(newEncryptedMessage);
+                byte[] digitalSignature = Base64.getDecoder().decode(digitalSignatureString);
+                Signature signature = Signature.getInstance("SHA256withRSA");
+                signature.initVerify(loadPublicKeyForUser(clientId));
+                signature.update(encryptedMessageBytes);
+                boolean signatureVerified = signature.verify(digitalSignature);
+
+                if (signatureVerified) {
+                    // Proceed with decryption and processing of the message
+                    String decryptedMessage = decrypt(new String(encryptedMessageBytes), serverPrivateKey);
+                    // Handle the decrypted message
+
+                    // Processing the decrypted message can go here
+                    // For example:
                     String[] parts = decryptedMessage.split(":", 2);
-                    if (parts.length == 2) { // Ensure the message format is correct
+                    if (parts.length == 2) {
                         String recipientId = parts[0];
                         String messageContent = parts[1];
-                        MessageStore.addMessage(new Message(clientId, recipientId, messageContent, new Date())); // Store the new message
-                    }
+                        // Store the new message or perform any other processing
+                        Message newMessage = new Message(clientId, recipientId, messageContent, new Date());
 
-                    // Optionally, wait for more messages or close the connection
-                    newEncryptedMessage = in.readLine(); // For continuous communication, remove or adjust this line according to your protocol
+                        // Print the incoming message to the server console
+                        System.out.println("Incoming message from: " + clientId);
+                        System.out.println("Timestamp: " + newMessage.getTimestamp());
+                        System.out.println("Recipient: " + recipientId);
+                        System.out.println("Message: " + messageContent);
+                    }
+                } else {
+                    // Signature verification failed, handle the error
                 }
 
-                System.out.println("Client " + clientId + " disconnected.");
+                // Print a message when a client disconnects
+                System.out.println("Client " + hashedClientId + " disconnected.");
             } catch (IOException e) {
                 logger.log(Level.SEVERE, "Error handling client connection", e);
             } catch (GeneralSecurityException e) {
                 logger.log(Level.SEVERE, "Error decrypting message", e);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
 
-
-        private String decryptMessage(String encryptedMessage, PrivateKey privateKey) throws GeneralSecurityException {
+        private String decrypt(String encryptedMessage, PrivateKey privateKey) throws GeneralSecurityException {
             Cipher decryptCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
             decryptCipher.init(Cipher.DECRYPT_MODE, privateKey);
             byte[] decryptedBytes = decryptCipher.doFinal(Base64.getDecoder().decode(encryptedMessage));
@@ -176,12 +203,26 @@ public class Server {
             }
         }
 
-        private static boolean verifySignature(String data, String signature, PublicKey publicKey) throws GeneralSecurityException {
-            Signature sig = Signature.getInstance("SHA256withRSA");
-            sig.initVerify(publicKey);
-            sig.update(data.getBytes());
-            return sig.verify(Base64.getDecoder().decode(signature));
-        }
+        private static String hashUserID(String userID) {
+            String secret = "gfhk2024:";
+            String input = secret + userID;
+            try {
+                // Create MD5 hash instance
+                MessageDigest md = MessageDigest.getInstance("MD5");
+                md.update(input.getBytes());
 
+                // Convert hash bytes to hexadecimal string
+                byte[] digest = md.digest();
+                StringBuilder hexString = new StringBuilder();
+                for (byte b : digest) {
+                    hexString.append(String.format("%02x", b & 0xff));
+                }
+                return hexString.toString();
+            } catch (NoSuchAlgorithmException e) {
+                // Handle hashing algorithm not found
+                e.printStackTrace();
+                return null;
+            }
+        }
     }
 }

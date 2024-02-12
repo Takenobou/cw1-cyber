@@ -4,14 +4,13 @@ import java.util.Date;
 
 public class Message {
     private String sender;
-    private String recipient; // Consider storing encrypted if necessary
-    private String content; // Already encrypted
+    private String recipient;
+    private String content;
     private Date timestamp;
-    // Optional: include a digital signature property if needed
 
-    public Message(String sender, String recipient, String content, Date timestamp) {
-        this.sender = sender;
-        this.recipient = recipient;
+    public Message(String senderId, String recipientId, String content, Date timestamp) {
+        this.sender = senderId;
+        this.recipient = recipientId;
         this.content = content;
         this.timestamp = timestamp;
     }

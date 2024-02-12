@@ -50,8 +50,14 @@ public class Client {
                  PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
                 logger.info("Connected to the server as " + userId);
 
-                // Encrypt and send the user ID
+                // Generate the hashed user ID
+                String hashedUserId = hashUserId(userId);
+
+                // Encrypt the user ID using the server's public key
                 String encryptedUserId = encrypt(userId, serverPublicKey);
+
+                // Send both the hashed and encrypted user IDs to the server
+                out.println(hashedUserId);
                 out.println(encryptedUserId);
 
                 // Wait for server acknowledgment
@@ -66,48 +72,67 @@ public class Client {
                 System.out.println("There are " + messageCount + " message(s) for you.");
 
                 for (int i = 0; i < messageCount; i++) {
-                    // Receive the message along with the timestamp
-                    String timestampString = in.readLine();
-                    Date timestamp = new Date(Long.parseLong(timestampString));
-
-                    // Assume server sends encrypted messages that client can decrypt with its private key
+                    long timestamp = Long.parseLong(in.readLine());
                     String encryptedMessage = in.readLine();
-                    String decryptedMessage = decrypt(encryptedMessage, loadPrivateKey(userId + ".prv"));
+                    String digitalSignature = in.readLine();
 
-                    System.out.println("Date: " + timestamp);
-                    System.out.println("Message " + (i + 1) + ": " + decryptedMessage);
+                    // Verify the digital signature
+                    Signature signature = Signature.getInstance("SHA256withRSA");
+                    signature.initVerify(serverPublicKey);
+                    signature.update(encryptedMessage.getBytes());
+
+                    if (signature.verify(Base64.getDecoder().decode(digitalSignature))) {
+                        // Decrypt the message if signature is verified
+                        String decryptedMessage = decrypt(encryptedMessage, loadPrivateKey(userId + ".prv"));
+                        System.out.println("Date: " + new Date(timestamp));
+                        System.out.println("Received message: " + decryptedMessage);
+                    } else {
+                        // Terminate the connection if signature is not verified
+                        System.out.println("Digital signature verification failed. Terminating connection.");
+                        return;
+                    }
                 }
-
-                System.out.println("Enter recipient's user ID:");
                 BufferedReader userInput = new BufferedReader(new InputStreamReader(System.in));
-                String recipientId = userInput.readLine(); // Read recipient's user ID
 
-                System.out.println("Enter your message:");
-                String message = userInput.readLine(); // Read message content
+                while (true) {
+                    System.out.print("Do you want to send a message? [y/n]: ");
+                    String choice = userInput.readLine();
+                    if (choice.equalsIgnoreCase("n")) {
+                        break;
+                    }
+                    else if (choice.equalsIgnoreCase("y")) {
+                        System.out.println("Enter recipient's user ID:");
+                        String recipientId = userInput.readLine(); // Read recipient's user ID
 
-                // Concatenate recipientId and message with a colon separator
-                String newMessage = recipientId + ":" + message;
+                        System.out.println("Enter your message:");
+                        String message = userInput.readLine(); // Read message content
 
-                // Get current timestamp
-                Date currentTime = new Date();
-                SimpleDateFormat dateFormat = new SimpleDateFormat("E MMM dd HH:mm:ss zzz yyyy");
-                String formattedTimestamp = dateFormat.format(currentTime);
+                        // Concatenate recipientId and message with a colon separator
+                        String newMessage = recipientId + ":" + message;
 
-                // After encrypting the message
-                byte[] encryptedMessageBytes = encrypt(newMessage, serverPublicKey).getBytes();
+                        // Get current timestamp
+                        Date currentTime = new Date();
+                        SimpleDateFormat dateFormat = new SimpleDateFormat("E MMM dd HH:mm:ss zzz yyyy");
+                        String formattedTimestamp = dateFormat.format(currentTime);
 
-                // Generate a digital signature using the client's private key
-                Signature signature = Signature.getInstance("SHA256withRSA");
-                signature.initSign(loadPrivateKey(userId + ".prv"));
-                signature.update(encryptedMessageBytes);
-                byte[] digitalSignature = signature.sign();
+                        // After encrypting the message
+                        byte[] encryptedMessageBytes = encrypt(newMessage, serverPublicKey).getBytes();
 
-                // Send the encrypted message and the digital signature to the server
-                out.println(formattedTimestamp);
-                out.println(Base64.getEncoder().encodeToString(encryptedMessageBytes)); // Send encrypted message
-                out.println(Base64.getEncoder().encodeToString(digitalSignature)); // Send digital signature
-                System.out.println("Encrypted message sent to the server.");
-                logger.info("New message sent to the server.");
+                        // Send the encrypted message
+                        out.println(formattedTimestamp);
+                        out.flush();
+                        out.println(Base64.getEncoder().encodeToString(encryptedMessageBytes));
+                        out.flush();
+                        out.write(recipientId + "\n");
+                        out.flush();
+                        System.out.println("Encrypted message sent to the server.");
+                        logger.info("New message sent to the server.");
+                        break;
+                    }
+                    else {
+                        System.out.println("Invalid choice. Please enter 'y' or 'n'.");
+                    }
+                }
             }
         } catch (IOException e) {
             logger.log(Level.WARNING, "IO Exception while connecting or communicating with server", e);
@@ -120,6 +145,14 @@ public class Client {
 
     private static PublicKey loadPublicKey(String filename) throws Exception {
         byte[] keyBytes = Files.readAllBytes(Paths.get(filename));
+        X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
+        KeyFactory kf = KeyFactory.getInstance("RSA");
+        return kf.generatePublic(spec);
+    }
+
+    private static PublicKey loadPublicKeyForUser(String userId) throws Exception {
+        String publicKeyFilename = userId + ".pub";
+        byte[] keyBytes = Files.readAllBytes(Paths.get(publicKeyFilename));
         X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
         KeyFactory kf = KeyFactory.getInstance("RSA");
         return kf.generatePublic(spec);
@@ -144,5 +177,22 @@ public class Client {
         cipher.init(Cipher.DECRYPT_MODE, privateKey);
         byte[] decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedData));
         return new String(decryptedBytes);
+    }
+
+    private static String hashUserId(String userId) throws NoSuchAlgorithmException {
+        String secret = "gfhk2024:";
+        String dataToHash = secret + userId;
+
+        MessageDigest md = MessageDigest.getInstance("MD5");
+        byte[] hashBytes = md.digest(dataToHash.getBytes());
+
+        // Convert the byte array to a hexadecimal string
+        StringBuilder hexString = new StringBuilder();
+        for (byte hashByte : hashBytes) {
+            String hex = Integer.toHexString(0xff & hashByte);
+            if (hex.length() == 1) hexString.append('0');
+            hexString.append(hex);
+        }
+        return hexString.toString();
     }
 }

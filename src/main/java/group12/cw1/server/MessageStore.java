@@ -7,7 +7,7 @@ public class MessageStore {
     private static final ConcurrentHashMap<String, ArrayList<Message>> messages = new ConcurrentHashMap<>();
 
     public static void addMessage(Message message) {
-        String recipientEncryptedUserId = encryptRecipientUserId(message.getRecipient());
+        String recipientEncryptedUserId = message.getRecipient();
         messages.computeIfAbsent(recipientEncryptedUserId, k -> new ArrayList<>()).add(message);
     }
 
@@ -15,9 +15,7 @@ public class MessageStore {
         return messages.getOrDefault(recipientHashedUserId, new ArrayList<>());
     }
 
-    // Dummy encryption method for recipient user ID
-    private static String encryptRecipientUserId(String recipientUserId) {
-        // Implement encryption logic here
-        return recipientUserId; // Placeholder, should return encrypted user ID
+    public static void deleteMessagesForRecipient(String recipientHashedUserId) {
+        messages.remove(recipientHashedUserId);
     }
 }

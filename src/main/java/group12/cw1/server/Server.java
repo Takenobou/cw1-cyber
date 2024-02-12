@@ -113,9 +113,8 @@ public class Server {
                 String encryptedClientId = in.readLine();
 
                 String clientId = decrypt(encryptedClientId, serverPrivateKey);
-                String HashedClientId = hashedUserId;
 
-                System.out.println("Client ID: " + HashedClientId);
+                System.out.println("Client ID: " + hashedUserId);
 
                 // Step 2: Send stored messages to the client
                 ArrayList<Message> messagesForClient = MessageStore.getMessagesForRecipient(clientId);
@@ -141,7 +140,7 @@ public class Server {
                     out.write(Base64.getEncoder().encodeToString(digitalSignature) + "\n"); // Send digital signature
                     out.flush();
                 }
-
+                MessageStore.deleteMessagesForRecipient(clientId);
 
                 // Step 3: Listen for a new message
                 String timestampStr = in.readLine(); // Read timestamp from client
@@ -182,7 +181,7 @@ public class Server {
                 }
 
                 // Print a message when a client disconnects
-                System.out.println("Client " + HashedClientId + " disconnected.");
+                System.out.println("Client " + hashedUserId + " disconnected.");
             } catch (IOException e) {
                 logger.log(Level.SEVERE, "Error handling client connection", e);
             } catch (GeneralSecurityException e) {

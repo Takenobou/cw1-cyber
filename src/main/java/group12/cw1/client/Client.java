@@ -10,24 +10,15 @@ import java.nio.file.Paths;
 import javax.crypto.Cipher;
 import java.text.SimpleDateFormat;
 import java.util.Base64;
-import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.logging.SimpleFormatter;
 import java.util.Date;
 
 public class Client {
     private static final Logger logger = Logger.getLogger(Client.class.getName());
 
     static {
-        try {
-            FileHandler fileHandler = new FileHandler("ClientLog.log", true);
-            fileHandler.setFormatter(new SimpleFormatter());
-            logger.addHandler(fileHandler);
-            logger.setLevel(Level.ALL);
-        } catch (IOException e) {
-            logger.log(Level.SEVERE, "File logger not working.", e);
-        }
+        logger.setLevel(Level.SEVERE);
     }
 
     public static void main(String[] args) {
@@ -102,12 +93,12 @@ public class Client {
                     }
                     else if (choice.equalsIgnoreCase("y")) {
                         System.out.println("Enter recipient's user ID:");
-                        String recipientId = userInput.readLine(); // Read recipient's user ID
+                        String recipientId = userInput.readLine();
 
                         System.out.println("Enter your message:");
-                        String message = userInput.readLine(); // Read message content
+                        String message = userInput.readLine();
 
-                        // Concatenate recipientId and message with a colon separator
+                        // Concatenate recipientId and message with a delimiter
                         String newMessage = recipientId + ":" + message;
 
                         // Get current timestamp
@@ -144,21 +135,15 @@ public class Client {
     }
 
     private static PublicKey loadPublicKey(String filename) throws Exception {
+        // Loads a public key from a specified file using RSA algorithm.
         byte[] keyBytes = Files.readAllBytes(Paths.get(filename));
         X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
         KeyFactory kf = KeyFactory.getInstance("RSA");
         return kf.generatePublic(spec);
     }
 
-    private static PublicKey loadPublicKeyForUser(String userId) throws Exception {
-        String publicKeyFilename = userId + ".pub";
-        byte[] keyBytes = Files.readAllBytes(Paths.get(publicKeyFilename));
-        X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
-        KeyFactory kf = KeyFactory.getInstance("RSA");
-        return kf.generatePublic(spec);
-    }
-
     private static PrivateKey loadPrivateKey(String filename) throws Exception {
+        // Loads a private key from a specified file using RSA algorithm.
         byte[] keyBytes = Files.readAllBytes(Paths.get(filename));
         PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(keyBytes);
         KeyFactory kf = KeyFactory.getInstance("RSA");
@@ -166,6 +151,7 @@ public class Client {
     }
 
     private static String encrypt(String data, PublicKey key) throws GeneralSecurityException {
+        // Encrypts data using an RSA public key.
         Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
         cipher.init(Cipher.ENCRYPT_MODE, key);
         byte[] encryptedBytes = cipher.doFinal(data.getBytes());
@@ -173,6 +159,7 @@ public class Client {
     }
 
     private static String decrypt(String encryptedData, PrivateKey privateKey) throws GeneralSecurityException {
+        // Decrypts data using an RSA private key.
         Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
         cipher.init(Cipher.DECRYPT_MODE, privateKey);
         byte[] decryptedBytes = cipher.doFinal(Base64.getDecoder().decode(encryptedData));
@@ -180,6 +167,7 @@ public class Client {
     }
 
     private static String hashUserId(String userId) throws NoSuchAlgorithmException {
+        // Hashes a userid with a secret prefix using MD5 and returns the hexadecimal string.
         String secret = "gfhk2024:";
         String dataToHash = secret + userId;
 

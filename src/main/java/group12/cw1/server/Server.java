@@ -1,5 +1,6 @@
 package group12.cw1.server;
 
+import javax.crypto.BadPaddingException;
 import javax.crypto.Cipher;
 import java.io.*;
 import java.net.ServerSocket;
@@ -15,8 +16,6 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.logging.FileHandler;
-import java.util.logging.SimpleFormatter;
 
 public class Server {
 
@@ -25,14 +24,7 @@ public class Server {
     private static final HashMap<String, PublicKey> publicKeyMap = new HashMap<>();
 
     static {
-        try {
-            FileHandler fileHandler = new FileHandler("ServerLog.log", true);
-            fileHandler.setFormatter(new SimpleFormatter());
-            logger.addHandler(fileHandler);
-            logger.setLevel(Level.ALL);
-        } catch (IOException e) {
-            logger.log(Level.SEVERE, "File logger not working.", e);
-        }
+        logger.setLevel(Level.ALL);
     }
 
     public static void main(String[] args) {
@@ -74,7 +66,6 @@ public class Server {
                     break;
                 } catch (Exception e) {
                     logger.log(Level.SEVERE, "Unexpected exception while accepting a connection", e);
-                    // TODO: EXPAND EXCEPTION HANDLING
                 }
             }
         } catch (IOException e) {
@@ -104,11 +95,11 @@ public class Server {
             try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                  BufferedWriter out = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()))) {
 
-                // Initially acknowledge connection to client for further communication
+                // Acknowledge connection to client for further communication
                 out.write("ACK\n");
                 out.flush();
 
-                // Step 1: Wait for the client to send their ID
+                // Wait for the client to send their ID
                 String hashedUserId = in.readLine();
                 String encryptedClientId = in.readLine();
 
@@ -116,9 +107,10 @@ public class Server {
 
                 System.out.println("Client ID: " + hashedUserId);
 
-                // Step 2: Send stored messages to the client
+                // Send stored messages to the client
                 ArrayList<Message> messagesForClient = MessageStore.getMessagesForRecipient(clientId);
-                out.write(messagesForClient.size() + "\n"); // Inform the client about the number of messages
+                System.out.println("Delivering " + messagesForClient.size() + " new messages...");
+                out.write(messagesForClient.size() + "\n");
                 out.flush();
 
                 // Send messages to the client
@@ -129,58 +121,63 @@ public class Server {
                     // Generate a digital signature using the server's private key
                     Signature signature = Signature.getInstance("SHA256withRSA");
                     signature.initSign(serverPrivateKey);
+                    // Ensure encryptedMessage is not null to avoid NullPointerException
+                    assert encryptedMessage != null;
                     signature.update(encryptedMessage.getBytes());
                     byte[] digitalSignature = signature.sign();
 
                     // Send the encrypted message, timestamp, and signature to the client
-                    out.write(msg.getTimestamp().getTime() + "\n"); // Send timestamp as milliseconds
+                    out.write(msg.getTimestamp().getTime() + "\n");
                     out.flush();
-                    out.write(encryptedMessage + "\n"); // Send encrypted message
+                    out.write(encryptedMessage + "\n");
                     out.flush();
-                    out.write(Base64.getEncoder().encodeToString(digitalSignature) + "\n"); // Send digital signature
+                    out.write(Base64.getEncoder().encodeToString(digitalSignature) + "\n");
                     out.flush();
                 }
+                // Clear message store for that client
                 MessageStore.deleteMessagesForRecipient(clientId);
 
-                // Step 3: Listen for a new message
-                String timestampStr = in.readLine(); // Read timestamp from client
-                String newEncryptedMessage = in.readLine(); // Read encrypted message from client
+                // Listen for a new message
+                String timestampStr = in.readLine();
+                String newEncryptedMessage = in.readLine();
 
-                // Check if the encrypted message received is not null
-                if (newEncryptedMessage != null) {
-                    // Proceed with decryption and processing of the message
-                    byte[] encryptedMessageBytes = Base64.getDecoder().decode(newEncryptedMessage);
-                    // Proceed with decryption and processing of the message
-                    String decryptedMessage = decrypt(new String(encryptedMessageBytes), serverPrivateKey);
-                    // Handle the decrypted message
+                try {
+                    // Check if the encrypted message received is not null
+                    if (newEncryptedMessage != null) {
+                        byte[] encryptedMessageBytes = Base64.getDecoder().decode(newEncryptedMessage);
+                        String decryptedMessage = decrypt(new String(encryptedMessageBytes), serverPrivateKey);
 
-                    // Processing the decrypted messages
-                    String[] parts = decryptedMessage.split(":", 2);
-                    if (parts.length == 2) {
-                        String recipientId = parts[0];
-                        String messageContent = parts[1];
+                        // Processing the decrypted messages
+                        String[] parts = decryptedMessage.split(":", 2);
+                        if (parts.length == 2) {
+                            String recipientId = parts[0];
+                            String messageContent = parts[1];
 
-                        // Retrieve the recipient's public key from the map
-                        PublicKey recipientPublicKey = publicKeyMap.get(recipientId);
-                        if (recipientPublicKey == null) {
-                            recipientPublicKey = loadPublicKeyForUser(recipientId);
-                            publicKeyMap.put(recipientId, recipientPublicKey);
+                            // Retrieve the recipient's public key from the map
+                            PublicKey recipientPublicKey = publicKeyMap.get(recipientId);
+                            if (recipientPublicKey == null) {
+                                recipientPublicKey = loadPublicKeyForUser(recipientId);
+                                publicKeyMap.put(recipientId, recipientPublicKey);
+                            }
+
+                            // Store the new message or perform any other processing
+                            MessageStore.addMessage(new Message(clientId, recipientId, messageContent, new Date()));
+
+                            System.out.println("Incoming message from: " + clientId);
+                            System.out.println("Date: " + timestampStr);
+                            System.out.println("Recipient: " + recipientId);
+                            System.out.println("Message: " + messageContent);
                         }
-
-                        // Store the new message or perform any other processing
-                        MessageStore.addMessage(new Message(clientId, recipientId, messageContent, new Date()));
-
-                        System.out.println("Incoming message from: " + clientId);
-                        System.out.println("Date: " + timestampStr);
-                        System.out.println("Recipient: " + recipientId);
-                        System.out.println("Message: " + messageContent);
+                    } else {
+                        System.out.println("Received null encrypted message from client or user chose not to send a message.");
                     }
-                } else {
-                    // Handle case where encrypted message is null
-                    System.out.println("Received null encrypted message from client or user chose not to send a message.");
+                } catch (BadPaddingException e) {
+                    logger.log(Level.INFO, "Decryption failed due to bad padding. Message discarded.");
+                    return;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
 
-                // Print a message when a client disconnects
                 System.out.println("Client " + hashedUserId + " disconnected.");
             } catch (IOException e) {
                 logger.log(Level.SEVERE, "Error handling client connection", e);
@@ -192,13 +189,21 @@ public class Server {
         }
     }
     private static String decrypt(String encryptedMessage, PrivateKey privateKey) throws GeneralSecurityException {
-        Cipher decryptCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
-        decryptCipher.init(Cipher.DECRYPT_MODE, privateKey);
-        byte[] decryptedBytes = decryptCipher.doFinal(Base64.getDecoder().decode(encryptedMessage));
-        return new String(decryptedBytes);
+        // Decrypts an RSA-encrypted message using a private key and handles padding exceptions.
+        try {
+            Cipher decryptCipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+            decryptCipher.init(Cipher.DECRYPT_MODE, privateKey);
+            byte[] decryptedBytes = decryptCipher.doFinal(Base64.getDecoder().decode(encryptedMessage));
+            return new String(decryptedBytes);
+        } catch (BadPaddingException e) {
+            // Log and discard the message if BadPaddingException occurs
+            logger.log(Level.SEVERE, "BadPaddingException: Incorrect padding, discarding the message", e);
+            throw e;
+        }
     }
 
     private static PublicKey loadPublicKeyForUser(String userId) throws Exception {
+        // Loads the RSA public key for a user from a .pub file based on the userId.
         String publicKeyFilename = userId + ".pub";
         byte[] keyBytes = Files.readAllBytes(Paths.get(publicKeyFilename));
         X509EncodedKeySpec spec = new X509EncodedKeySpec(keyBytes);
@@ -207,6 +212,7 @@ public class Server {
     }
 
     private static String encryptMessageForClient(String message, String clientId) {
+        // Encrypts a message for a client using the recipient's RSA public key.
         try {
             PublicKey recipientPublicKey = publicKeyMap.get(clientId);
             if (recipientPublicKey == null) {
@@ -219,7 +225,7 @@ public class Server {
             return Base64.getEncoder().encodeToString(encryptedBytes);
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Error encrypting message for " + clientId, e);
-            return null; // TODO: HANDLE PROPERLY THIS AINT GONNA CUT IT
+            return null;
         }
     }
 }
